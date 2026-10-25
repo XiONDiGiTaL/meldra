@@ -54,10 +54,47 @@ export const DIFFICULTY_PROFILES: Record<
 /** Reconnect grace window before a co-op match is abandoned. */
 export const DISCONNECT_GRACE_MS = 30_000;
 
+/** A clear inside this window continues the combo chain. */
+export const COMBO_WINDOW_TICKS = 100; // 5 s
+/** Hardest the ramp can get in Sudden Death. */
+export const SUDDEN_DEATH_FLOOR = 0.5;
+
+/** Meld Meter fills at these paces so an ability never arrives before a match is warm. */
+export const METER_CHARGE_SECONDS: Record<Difficulty, number> = { zen: 30, normal: 60, hard: 120 };
+
+/** Meteor Storm: telegraph length and the 20-35 s cadence. */
+export const METEOR_LEAD_TICKS = 50; // 2.5 s
+export const METEOR_MIN_TICKS = 400;
+export const METEOR_MAX_TICKS = 700;
+/** Starfall share of meteors when the variant is enabled (percent). */
+export const STARFALL_CHANCE = 18;
+
+/** Chaos events: announcement lead, duration, and cadence per level. */
+export const CHAOS_ANNOUNCE_TICKS = 60; // 3 s
+export const CHAOS_DURATION_TICKS = {
+  lowGravity: 300,
+  surge: 240,
+  blackout: 200,
+  colorSurge: 240,
+} as const;
+export const CHAOS_INTERVAL_TICKS = { occasional: [1200, 2000], frequent: [500, 900] } as const;
+
+/** Clash Attack: a charge costs four cleared rows, banks two charges, and cools down for 6 s. */
+export const ATTACK_COST = 4;
+export const ATTACK_MAX_POINTS = ATTACK_COST * 2;
+export const ATTACK_COOLDOWN_TICKS = 120;
+export const SURGE_TICKS = 200; // 10 s on the rival
+export const SHELL_TICKS = 160; // 8 s
+/** How many blocked cells a Crystal Shell may cover. */
+export const SHELL_MAX_CELLS = 3;
+/** A Crystal Obstruction drops at most this many cells. */
+export const OBSTRUCTION_CELLS = 2;
+
 /** Extra points for finishing a row your partner started. */
 export const MELD_BONUS = 200;
 
 export const ROOM_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 export const ROOM_CODE_LENGTH = 5;
 // v2 adds the host-selected difficulty to welcome, lobby and snapshot messages.
-export const PROTOCOL_VERSION = 2;
+// v3 adds the host-owned match rules to welcome and lobby messages.
+export const PROTOCOL_VERSION = 3;

@@ -3,6 +3,13 @@ import { clamp01, isAuroraSetting, isLobbyTheme, type AuroraSetting, type LobbyT
 
 export type Lang = 'en' | 'tr';
 
+/** Visual effect budget. Reduced keeps essential feedback; Off removes decoration. */
+export type EffectsLevel = 'full' | 'reduced' | 'off';
+
+export function isEffectsLevel(value: unknown): value is EffectsLevel {
+  return value === 'full' || value === 'reduced' || value === 'off';
+}
+
 export interface Settings {
   name: string;
   lang: Lang | 'auto';
@@ -19,6 +26,8 @@ export interface Settings {
   musicVolume: number;
   lobbyTheme: LobbyTheme;
   aurora: AuroraSetting;
+  /** Local only: never sent to the other player. */
+  effects: EffectsLevel;
 }
 
 const KEY = 'meldra.settings.v1';
@@ -36,6 +45,7 @@ const DEFAULTS: Settings = {
   musicVolume: 0.65,
   lobbyTheme: 'afterHours',
   aurora: 'subtle',
+  effects: 'full',
 };
 
 let cache: Settings | null = null;
@@ -66,6 +76,7 @@ export function loadSettings(): Settings {
         : DEFAULTS.musicVolume;
     if (!isLobbyTheme(cache.lobbyTheme)) cache.lobbyTheme = DEFAULTS.lobbyTheme;
     if (!isAuroraSetting(cache.aurora)) cache.aurora = DEFAULTS.aurora;
+    if (!isEffectsLevel(cache.effects)) cache.effects = DEFAULTS.effects;
     return { ...cache };
   } catch {
     return { ...DEFAULTS };

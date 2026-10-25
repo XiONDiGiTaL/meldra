@@ -3,6 +3,56 @@
 All notable changes to Meldra are recorded here. Dates use ISO 8601. "Verified" means the behaviour
 was executed in this environment; it does not mean a physical-device or production-hosting test.
 
+## 0.4.0 — 2026-10-24
+
+Host-owned room rules, a shared recovery ability, environmental hazards, and a Duel attack layer.
+
+### Added
+
+- **Together objectives:** Target Melds or Endless. The meld target is selectable from 5 to 100
+  with presets, defaults to five, and never changes the pace.
+- **Meld Meter:** an optional charge that fills automatically (Zen 30 s, Normal 60 s, Hard 120 s),
+  becomes an animated liquid-glass **MELD METER MAXED** button, and dissolves every locked crystal
+  while keeping both active pieces. It never scores a row or a Meld. In a Duel it only dissolves
+  the activator's own crystals. Pausing stops the charge; simultaneous activations cannot clear
+  twice.
+- **Meteor Storm:** telegraphed dark crystal meteors that destroy their cell and four orthogonal
+  neighbours, plus a rare brighter Starfall that clears 3 × 3. Neither counts as a clear or Meld.
+- **Combo chains:** consecutive clears inside five seconds escalate particles, glow and sound
+  without awarding extra Melds.
+- **Chaos events:** Low Gravity, Gravity Surge, Blackout and Color Surge, announced three seconds
+  ahead, with a visible countdown and one event at a time. Off / Occasional / Frequent.
+- **Clash Attack (Duel):** cleared rows bank charges; spend them on Obstruction, Gravity Surge or
+  Crystal Shell against the rival, with a six-second cooldown and two-charge cap.
+- **Sudden Death (Duel):** no row target, the first arena to top out loses, and the pace escalates.
+- **Visual effects setting:** Full, Reduced or Off, stored locally and never sent to the partner.
+- **Room rules panel:** host-editable, guest read-only, including the Duel row target presets.
+- **Renderer effects:** crystal fragments, luminous sweeps, dual-colour Meld waves, board-wide
+  meter pulses, meteor shockwaves, shell plates, chaos dimming and match-ending showers.
+
+### Changed
+
+- Protocol version is now 3: welcome and lobby messages carry the full rule set, and snapshots
+  carry meter charge, attack points, shells, meteors, chaos and combo depth.
+- The arena HUD gained a Meld Meter button, chaos/combo badges and a Duel Clash panel; the meter
+  reserves layout space on phones so the touch pads stay inside the viewport.
+- Room rules are locked once a match starts, so both clients always simulate the same rules.
+
+### Deferred
+
+- **Wild Blocks** and **Gravity Flip** remain unimplemented (see README known limitations); both
+  need engine rules that avoid exploitable Melds and unreadable collisions.
+
+### Testing
+
+- `npm test` — 75 unit tests, adding 22 for rule coercion, target/Endless, meter charging and
+  activation, duplicate activation, personal Duel meter, combos, meteors/Starfall, chaos scheduling
+  and gravity, all three Clash attacks, Sudden Death, shells, rule snapshots and a long
+  all-modifiers run.
+- `npm run test:e2e` — 18 Playwright tests, adding host/guest rule sync, guest read-only controls,
+  the meter in play and the Sudden Death/Clash HUD. The renderer was also driven directly through
+  every new effect at all three effect levels without exceptions.
+
 ## 0.3.0 — 2026-10-24
 
 A calmer start for new players: every mode now has a Zen, Normal or Hard pace, chosen on the menu

@@ -1,4 +1,5 @@
 import { PROTOCOL_VERSION, ROOM_CODE_ALPHABET, ROOM_CODE_LENGTH } from './constants.js';
+import type { MatchConfig } from './config.js';
 import type { Action, Difficulty, GameMode, Snapshot } from './types.js';
 
 export interface LobbyPlayer {
@@ -21,9 +22,16 @@ export type PeerMsg =
       room: string;
       mode: GameMode;
       difficulty: Difficulty;
+      config?: MatchConfig;
       players: LobbyPlayer[];
     }
-  | { t: 'lobby'; players: LobbyPlayer[]; mode: GameMode; difficulty: Difficulty }
+  | {
+      t: 'lobby';
+      players: LobbyPlayer[];
+      mode: GameMode;
+      difficulty: Difficulty;
+      config?: MatchConfig;
+    }
   | { t: 'set'; name?: string; palette?: string; ready?: boolean }
   | { t: 'start' }
   | { t: 'rematch' }

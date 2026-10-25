@@ -436,3 +436,64 @@ unrelated route was changed. GitHub Pages canonicalises `www.xiondigital.net` to
 Playwright: two contexts create a room with `?net=supabase`, ready up, start, and confirm a host
 hard drop reaches the guest. Deployment is verified separately by opening the public URL and
 checking assets, gameplay, and the room flow.
+
+---
+
+## D18. Room rules, the Meld Meter, hazards and the Duel attack layer
+
+**Rules live in the room, not the menu.** Together and Duel already have a lobby with a host and a
+guest, so the rules card sits there: the host edits it before starting, the guest sees the same
+controls disabled, and the values travel in the welcome and lobby messages (protocol v3). Solo,
+Relay and Rift keep their designed shape. Nothing about the menu changed, which also preserves the
+compact first screen from D17.
+
+**One rule set, one simulation.** `normalizeConfig` is the single coercion point: the host clamps
+everything it receives, ignores options that do not belong to the mode (Clash only in Duel, meteors
+and chaos only in Together), and every snapshot carries the resulting config. A guest therefore
+never reconstructs a different rule set, and the rules are locked once a match starts so a host
+cannot change the pace mid-simulation.
+
+**Meld Meter: a recovery valve, not a win button.** The charge rate is tied to the pace (Zen 30 s,
+Normal 60 s, Hard 120 s) rather than to clears, so it arrives at the same point in a match regardless
+of skill. It removes locked crystals only: both falling pieces are preserved, the wave does not
+score, and it does not count as a row or a Meld. Together shares one charge because the arena is
+shared; Duel gives each player a private charge that only dissolves their own crystals, which keeps
+it tactical rather than a free board wipe. Activation requires a full meter, resets to zero, and
+does nothing when no crystals are left, so two simultaneous activations produce exactly one event.
+
+**Meteor Storm is telegraphed space, not random punishment.** The landing cell is the top of a
+random column and is shown for 2.5 seconds. Impact removes that cell and its four neighbours;
+Starfall (18 % when enabled) removes a 3 × 3 area. Both bypass scoring entirely, so a meteor can
+open room or ruin a stack but can never manufacture a Meld. The interval starts at 20–35 seconds
+and is tuned by the config, not by the score.
+
+**Chaos events are announced and exclusive.** A 3-second lead-in, a visible countdown and a
+single active event prevent the two gravity modifiers from stacking or cancelling each other. The
+scheduler never repeats the same event twice in a row, and Blackout dims only the arena shell:
+locked crystals and the active piece keep their contrast.
+
+**Combos reward continuity without double counting.** A clear inside the five-second window
+increments a chain value carried on the event; particles, ring size and the clear chord scale with
+it. Melds are still counted per row by the clearing pass, so a chain can never award extra Melds.
+
+**Clash Attack is bounded on every axis.** Points come only from cleared rows, a charge costs four
+points, at most two charges bank, and there is a six-second cooldown. Obstruction refuses columns
+without headroom and drops two cells; Gravity Surge lasts ten seconds on the rival only; Crystal
+Shell plates at most three crystals for eight seconds and expires into a normal clear pass. Shells
+are deliberately visible (a cracked white-violet plate) so the blocked row reads as a status, not
+a bug. The combination of caps, expiry and refusal leaves no attack that can force an unavoidable
+loss.
+
+**Sudden Death is a different objective, not a harder Duel.** The row target is zero, the first
+arena to top out loses, and a second ramp multiplies gravity down toward 50 % over two minutes.
+This keeps the existing top-out rule and avoids a separate win condition.
+
+**Visual effects are local.** The help panel stores Full/Reduced/Off per browser. The renderer
+drops decoration first, then waves and fragments; shells, meteor telegraphs and chaos dimming are
+treated as essential information and stay legible even at Off. Nothing about the setting is sent
+to the partner.
+
+**Wild Blocks and Gravity Flip are deferred.** A wildcard needs a row-completion rule that cannot
+be farmed for free Melds, and Gravity Flip needs collision and lock rules that stay readable with
+two active pieces in one arena. Shipping either as a half-rule would undermine the deterministic
+engine, so they are documented as open work rather than faked.

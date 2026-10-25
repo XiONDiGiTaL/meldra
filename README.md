@@ -29,8 +29,8 @@ address served by GitHub Pages.
 | Mode | Players | Goal | Status |
 | --- | --- | --- | --- |
 | **Solo** | 1 | Clear 12 rows. | Playable |
-| **Together** | 2 online | Build five Melds on one shared board. | Playable |
-| **Duel** | 2 online | Share the arena, but only rows *you* finish score. First to 8 wins. | Playable |
+| **Together** | 2 online | Build a Meld target (5–100) on one shared board, or play Endless Together. | Playable |
+| **Duel** | 2 online | Share the arena, but only rows *you* finish score. Reach the row target or win Sudden Death. | Playable |
 | **Relay** | 2 online | Take turns with a single falling piece and build five Melds together. | Playable |
 | **Rift** | 2 online | Survive three 60-second waves while gravity keeps rising. | Playable |
 | **Architect** | 1 | Clear 10 rows from a deterministic half-built stack. | Playable |
@@ -53,6 +53,52 @@ A single **Difficulty** control on the menu sets the pace for whatever you play 
 The choice is saved with the other preferences. In a room, the host can change the pace in the
 lobby before starting; it is shown to both players and used by the shared engine. The guest
 inherits it and sees the same value in the arena HUD.
+
+### Room rules and modifiers
+
+Every hosted room exposes a **Room rules** card. The host edits it before starting; the guest
+sees the same values read-only, so both clients simulate the identical rule set.
+
+| Together | Choices | Effect |
+| --- | --- | --- |
+| Objective | Target Melds / Endless | Endless removes the victory target and runs until the arena tops out. |
+| Meld target | 5, 10, 15, 20, 30, 40, 50, 75, 100 | Longer matches only; the pace is untouched. |
+| Meld Meter | Off / On | A shared charge that fills automatically and dissolves locked crystals. |
+| Meteor storm | Off / Standard / Standard + Starfall | Telegraphed impacts that break the stack, with a rare wider Starfall. |
+| Chaos events | Off / Occasional / Frequent | Announced, one-at-a-time gravity and light shifts. |
+
+| Duel | Choices | Effect |
+| --- | --- | --- |
+| Objective | Target rows / Sudden Death | Sudden Death removes the target; the first arena to top out loses. |
+| Rows to win | 3, 5, 8, 12, 15, 20 | The row target for a normal Duel. |
+| Meld Meter | Off / On | Each player charges a private meter that dissolves only their own crystals. |
+| Clash Attack | Off / On | Bank cleared rows, then spend them to disrupt your rival. |
+
+**Meld Meter.** The shared charge fills in 30 seconds on Zen, 60 on Normal and 120 on Hard. When
+full it becomes an animated liquid-glass button reading **MELD METER MAXED**; click it, tap it,
+or press `M`. It dissolves every locked crystal in the arena, keeps both falling pieces, and never
+scores a row or a Meld. In a Duel it only dissolves your own crystals. Two simultaneous
+activations cannot clear twice.
+
+**Meteor storm.** Each meteor is a dark crystal cube with a burning star inside. Its landing cell
+is telegraphed for 2.5 seconds; on impact it destroys that cell and its four orthogonal
+neighbours. Starfall is rarer, brighter, and clears a 3 × 3 area. Neither counts as a row clear or
+a Meld.
+
+**Combo chains.** Clears inside a five-second window escalate the chain, the glow, the fragment
+count and the sound. A single clear still only awards the Melds it actually completes.
+
+**Chaos events.** Low Gravity, Gravity Surge, Blackout and Color Surge are announced three seconds
+before they begin, display their remaining time, and never run at the same time as another event.
+
+**Clash Attack.** Cleared rows bank attack points, up to two charges, with a six-second cooldown.
+Obstruction drops two crystals into a safe column of the rival arena, Gravity Surge accelerates
+their fall for ten seconds, and Crystal Shell plates three of their crystals for eight seconds so
+those cells cannot clear. Charges are capped and shells expire, so no attack can force an
+unavoidable loss.
+
+**Visual effects.** The help panel offers Full, Reduced and Off. This is a local preference: it
+never changes what your partner sees.
 
 ### What makes Meldra different
 
@@ -88,6 +134,7 @@ Press **C** (or the Mark button) to flag a column for your partner for three sec
 | Soft drop | `S` or `↓` | soft-drop pad, or drag down |
 | Hard drop | `Space` | drop pad |
 | Mark column | `C` | mark pad |
+| Meld Meter | `M` | tap the meter above the arena |
 | Pause | `Esc` | pause button |
 
 Holding a movement pad or key repeats the action at a fixed rate. The page does not scroll while
@@ -152,9 +199,10 @@ npm run screenshots                        # writes docs/screenshots/*.png
 ```text
 src/
   shared/            deterministic rules, no DOM and no clock
-    constants.ts     board size, tick rate, lock delay, per-mode targets
+    constants.ts     board size, tick rate, lock delay, per-mode targets, modifier tuning
+    config.ts        host-owned room rules, presets and wire coercion
     pieces.ts        piece tables, rotations, collision
-    engine.ts        create/apply/advance, line clearing, Melds, Duel, Relay, Rift
+    engine.ts        create/apply/advance, clearing, Melds, meter, meteors, chaos, Clash, Rift
     protocol.ts      peer messages, room codes
     types.ts         state, actions, events, snapshot wire types, mode lists
   client/
@@ -206,8 +254,8 @@ The repo's Pages source is set to **GitHub Actions**, not a branch, so `dist/` i
 ## Tests
 
 ```bash
-npm test                # 53 unit tests: rules, difficulty, Duel/Relay/Rift, wire format, i18n, music
-npm run test:e2e        # 16 Playwright tests: co-op, Duel, Relay, Rift, difficulty, Supabase
+npm test                # 75 unit tests: rules, modifiers, difficulty, Duel/Relay/Rift, wire format, i18n, music
+npm run test:e2e        # 18 Playwright tests: co-op, Duel, room rules, Relay, Rift, difficulty, Supabase
 ```
 
 The Playwright suite uses two isolated browser contexts and covers:
@@ -215,6 +263,8 @@ The Playwright suite uses two isolated browser contexts and covers:
 - Create, join, ready, start, shared inputs, shared pause, defeat, rematch, and guest reconnection.
 - Duel mode selection, room inheritance, per-mode music routing, and synced boards.
 - A host selecting Zen and a guest inheriting the pace in the lobby and the HUD.
+- Room rules syncing to the guest, guest read-only controls, the Meld Meter in play, Sudden
+  Death, and the Clash panel.
 - Relay turn handoff and Rift wave display.
 - Architect debris and Endless's no-target goal.
 - A real room over the production Supabase broadcast transport (`?net=supabase`).
@@ -237,8 +287,12 @@ not the browser suite.
   treats a silent guest as offline, but cannot detect a throttled host on its own.
 - **Physical devices.** Touch and phone layouts are verified with Chromium device emulation at
   390 × 844, not on a physical iPhone or in Safari.
-- **Clash.** A four-player team mode needs a wider arena and four-player room protocol. It
-  remains a design proposal; every other mode in the table is implemented.
+- **Wild Blocks and Gravity Flip.** These two experimental modifiers are designed but not
+  shipped: Wild Blocks need a row-completion rule that cannot be exploited for free Melds, and
+  Gravity Flip needs collision rules that stay readable in a two-piece shared arena. Every other
+  modifier in this document is implemented.
+- **Clash (four-player).** A four-player team mode needs a wider arena and four-player room
+  protocol. The room-level Clash Attack modifier above is implemented for two-player Duels.
 - **Music.** Playback is local, six MP3s with crossfaded loop points. Autoplay rules mean a
   freshly loaded tab starts music after the first gesture.
 

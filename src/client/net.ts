@@ -1,8 +1,10 @@
-import { COUNTDOWN_TICKS, DISCONNECT_GRACE_MS, PROTOCOL_VERSION, TICK_MS } from '../shared/constants.js';
+import { ATTACK_COST, COUNTDOWN_TICKS, DISCONNECT_GRACE_MS, PROTOCOL_VERSION, TICK_MS } from '../shared/constants.js';
+import { defaultConfig, normalizeConfig, type MatchConfig } from '../shared/config.js';
 import {
   advance,
   applyAction,
   createGame,
+  meterMaxTicks,
   snapshotToState,
   toSnapshot,
 } from '../shared/engine.js';
@@ -359,6 +361,7 @@ export abstract class BaseRoom {
   readonly selfId = randomId();
   mode: GameMode = 'coop';
   difficulty: Difficulty = 'normal';
+  config: MatchConfig = defaultConfig('coop');
   players: LobbyPlayer[] = [];
   status: RoomStatus = 'connecting';
   view: ViewState | null = null;
@@ -398,6 +401,7 @@ export abstract class BaseRoom {
   abstract setName(name: string): void;
   abstract setPalette(palette: string): void;
   abstract setDifficulty(difficulty: Difficulty): void;
+  abstract setConfig(patch: Partial<MatchConfig>): void;
   abstract start(): void;
   abstract rematch(): void;
   abstract toLobby(): void;
@@ -411,13 +415,28 @@ function buildView(
   players: LobbyPlayer[],
   localPlayer: number,
   paused = false,
-  pauseMs = 0,
-): ViewState {
+  pauseMs = 0,): ViewState {
+  const meterMax = Math.max(1, meterMaxTicks(state));
   return {
     mode: state.mode,
     difficulty: state.difficulty,
     phase: state.phase,
     countdown: countdownSeconds(state.phase, state.phaseTick, COUNTDOWN_TICKS),
+    config: state.config,
+    meter: state.meter.map((value) => Math.max(0, Math.min(1, value / meterMax))),
+    meterReady: state.meter.map((value) => value >= meterMax),
+    attack: [...state.attack],
+    attackCost: ATTACK_COST,
+    attackCooldown: [...state.attackCooldown],
+    meteors: state.meteors.map((meteor) => ({ ...meteor })),
+    chaos: state.chaos ? { ...state.chaos } : null,
+    chaosActive: Boolean(
+      state.chaos && state.tick >= state.chaos.start && state.tick < state.chaos.end,
+    ),
+    chaosIn: state.chaos ? Math.max(0, (state.chaos.start - state.tick) * TICK_MS) / 1000 : 0,
+    chaosLeft: state.chaos ? Math.max(0, (state.chaos.end - state.tick) * TICK_MS) / 1000 : 0,
+    shells: state.shells.map((shell) => ({ ...shell })),
+    combo: state.combo,
     board: state.board,
     pieces: state.players.map((player) => player.piece),
     next: state.players.map((player) => [...player.next]),
@@ -472,11 +491,13 @@ export class HostRoom extends BaseRoom {
     palette: string,
     mode: GameMode,
     difficulty: Difficulty,
+    rules: MatchConfig,
     private onFatal: (key: string) => void,
   ) {
     super(code);
     this.mode = mode;
     this.difficulty = difficulty;
+    this.config = normalizeConfig(mode, rules);
     this.selfName = name.trim() || 'Player';
     this.players = [
       { id: this.selfId, name: this.selfName, palette, ready: true, host: true, connected: true },
@@ -534,6 +555,7 @@ export class HostRoom extends BaseRoom {
       players: this.players,
       mode: this.mode,
       difficulty: this.difficulty,
+      config: this.config,
     });
     this.emit('lobby', this.players);
   }
@@ -656,6 +678,7 @@ export class HostRoom extends BaseRoom {
       room: this.code,
       mode: this.mode,
       difficulty: this.difficulty,
+      config: this.config,
       players: this.players,
     });
   }
@@ -778,6 +801,12 @@ export class HostRoom extends BaseRoom {
     this.broadcastLobby();
   }
 
+  setConfig(patch: Partial<MatchConfig>): void {
+    if (this.game) return;
+    this.config = normalizeConfig(this.mode, { ...this.config, ...patch });
+    this.broadcastLobby();
+  }
+
   start(): void {
     const guest = this.guest;
     if (!guest || !guest.connected) {
@@ -794,7 +823,7 @@ export class HostRoom extends BaseRoom {
   private startMatch(): void {
     if (this.guest) this.guest.ready = false;
     this.view = null;
-    this.game = createGame(this.mode, (Math.random() * 0xffffffff) >>> 0, this.difficulty);
+    this.game = createGame(this.mode, (Math.random() * 0xffffffff) >>> 0, this.difficulty, this.config);
     this.seqs = [0, 0];
     this.paused = false;
     this.pauseReason = null;
@@ -980,6 +1009,7 @@ export class GuestRoom extends BaseRoom {
         this.lastHostMessage = Date.now();
         this.mode = message.mode;
         this.difficulty = message.difficulty ?? 'normal';
+        this.config = normalizeConfig(this.mode, message.config);
         this.token = message.token;
         writeRoomToken(this.code, message.token);
         this.setStatus('online');
@@ -996,6 +1026,7 @@ export class GuestRoom extends BaseRoom {
         this.players = message.players;
         this.mode = message.mode;
         this.difficulty = message.difficulty ?? 'normal';
+        this.config = normalizeConfig(this.mode, message.config);
         this.emit('lobby', this.players);
         return;
       }
@@ -1095,6 +1126,10 @@ export class GuestRoom extends BaseRoom {
 
   setDifficulty(): void {
     // The host owns the shared pace; a guest sees it in the lobby instead.
+  }
+
+  setConfig(): void {
+    // Room rules are host-owned; the guest displays the values it receives.
   }
 
   start(): void {
@@ -1240,6 +1275,10 @@ export class SoloRoom extends BaseRoom {
     // A solo room's pace is fixed when the room is created.
   }
 
+  setConfig(): void {
+    // Solo modes keep their designed shape; room rules apply to hosted rooms.
+  }
+
   setPaused(paused: boolean): void {
     if (this.game.phase === 'won' || this.game.phase === 'lost') return;
     if (this.paused === paused) return;
@@ -1264,10 +1303,11 @@ export function createHostRoom(
   palette: string,
   mode: GameMode,
   difficulty: Difficulty,
+  rules: MatchConfig,
   onFatal: (key: string) => void,
   code = makeRoomCode(),
 ): HostRoom {
-  return new HostRoom(code, name, palette, mode, difficulty, onFatal);
+  return new HostRoom(code, name, palette, mode, difficulty, rules, onFatal);
 }
 
 export function createGuestRoom(

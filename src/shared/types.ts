@@ -1,3 +1,5 @@
+import type { MatchConfig } from './config.js';
+
 export type Phase = 'countdown' | 'playing' | 'won' | 'lost';
 
 export type GameMode = 'solo' | 'coop' | 'versus' | 'relay' | 'rift' | 'endless' | 'architect';
@@ -45,7 +47,47 @@ export interface Piece {
   resets: number;
 }
 
-export type EventType = 'clear' | 'meld' | 'ping' | 'lock' | 'win' | 'lose' | 'start';
+export type EventType =
+  | 'clear'
+  | 'meld'
+  | 'ping'
+  | 'lock'
+  | 'win'
+  | 'lose'
+  | 'start'
+  | 'meter'
+  | 'meteor'
+  | 'chaos'
+  | 'chaosEnd'
+  | 'attack';
+
+/** Environmental hazard: a burning crystal cube falling on a telegraphed cell. */
+export interface Meteor {
+  col: number;
+  row: number;
+  /** Tick when it lands. */
+  at: number;
+  /** Starfall variant: brighter and clears a wider area. */
+  star: boolean;
+}
+
+export type ChaosKind = 'lowGravity' | 'surge' | 'blackout' | 'colorSurge';
+
+/** A timed chaos event. `start` is after the announcement window so players can prepare. */
+export interface ChaosState {
+  kind: ChaosKind;
+  start: number;
+  end: number;
+}
+
+export type AttackKind = 'obstruction' | 'surge' | 'shell';
+
+/** A crystal shell plate that keeps a cell from clearing until it expires. */
+export interface CellShell {
+  /** Board index. */
+  i: number;
+  until: number;
+}
 
 /** Small state events used purely for feedback; the client renders and dedupes them. */
 export interface GameEvent {
@@ -59,6 +101,12 @@ export interface GameEvent {
   /** Row count or meld count, depending on the event. */
   n?: number;
   col?: number;
+  row?: number;
+  star?: boolean;
+  /** Combo depth for a clear. */
+  combo?: number;
+  /** Chaos or Clash flavour, depending on the event type. */
+  kind?: ChaosKind | AttackKind;
 }
 
 export interface PlayerRuntime {
@@ -96,6 +144,24 @@ export interface GameState {
   winner: number | null;
   /** Active slot in Relay, where only one piece falls at a time. */
   turn: number;
+  /** Host-owned room rules; both clients simulate with the same copy. */
+  config: MatchConfig;
+  /** Meld Meter charge in ticks, one per player. */
+  meter: number[];
+  /** Clash Attack charge in points, one per player. */
+  attack: number[];
+  attackCooldown: number[];
+  /** Tick until a Gravity Surge speeds this player's fall. */
+  surgeUntil: number[];
+  shells: CellShell[];
+  meteors: Meteor[];
+  nextMeteorTick: number;
+  chaos: ChaosState | null;
+  nextChaosTick: number;
+  lastChaos: ChaosKind | null;
+  /** Consecutive clear depth and the tick the chain window closes. */
+  combo: number;
+  comboUntil: number;
   events: GameEvent[];
   eventSeq: number;
 }
@@ -106,7 +172,9 @@ export type Action =
   | { t: 'rot'; d: 1 | -1 }
   | { t: 'soft' }
   | { t: 'hard' }
-  | { t: 'ping'; col?: number };
+  | { t: 'ping'; col?: number }
+  | { t: 'meter' }
+  | { t: 'clash'; kind: AttackKind };
 
 export interface PlayerMeta {
   name: string;
@@ -140,4 +208,17 @@ export interface Snapshot {
   turn?: number;
   paused?: boolean;
   pauseMs?: number;
+  config?: MatchConfig;
+  meter?: number[];
+  attack?: number[];
+  attackCooldown?: number[];
+  surgeUntil?: number[];
+  shells?: CellShell[];
+  meteors?: Meteor[];
+  nextMeteorTick?: number;
+  chaos?: ChaosState | null;
+  nextChaosTick?: number;
+  lastChaos?: ChaosKind | null;
+  combo?: number;
+  comboUntil?: number;
 }

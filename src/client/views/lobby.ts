@@ -8,6 +8,15 @@ import { difficultyKey } from '../view.js';
 import { controlGuide, copyText, el, isCoarsePointer, pill, toast } from '../ui.js';
 import type { LobbyPlayer } from '../../shared/protocol.js';
 import { DIFFICULTIES, type Difficulty, type GameMode } from '../../shared/types.js';
+import {
+  MELD_TARGET_PRESETS,
+  VERSUS_TARGET_PRESETS,
+  configurableMode,
+  type ChaosLevel,
+  type MatchConfig,
+  type MatchObjective,
+  type MeteorMode,
+} from '../../shared/config.js';
 import { sfx } from '../audio.js';
 
 function modeInfo(mode: GameMode): { label: 'lobby.modeTogether' | 'lobby.modeVersus' | 'lobby.modeRelay' | 'lobby.modeRift'; desc: 'lobby.modeTogetherDesc' | 'lobby.modeVersusDesc' | 'lobby.modeRelayDesc' | 'lobby.modeRiftDesc' } {
@@ -171,6 +180,195 @@ export function renderLobby(api: AppApi, room: BaseRoom): { node: HTMLElement; d
     return room.players.find((player) => !player.host);
   }
 
+  // ---------- room rules ----------
+
+  function ruleField(label: string, control: HTMLElement, hint?: string): HTMLElement {
+    return el(
+      'div',
+      { class: 'rule-field' },
+      el('span', { class: 'field-label', text: label }),
+      control,
+      hint ? el('small', { class: 'tiny faint', text: hint }) : null,
+    );
+  }
+
+  function segControl<T extends string>(
+    options: Array<{ value: T; label: string }>,
+    value: T,
+    disabled: boolean,
+    onPick: (value: T) => void,
+  ): HTMLElement {
+    return el(
+      'div',
+      { class: 'seg wrap', attrs: { role: 'group' } },
+      ...options.map((option) =>
+        el('button', {
+          attrs: {
+            type: 'button',
+            'aria-pressed': String(option.value === value),
+            disabled,
+          },
+          text: option.label,
+          on: {
+            click: () => {
+              if (!disabled) onPick(option.value);
+            },
+          },
+        }),
+      ),
+    );
+  }
+
+  function chipRow(
+    values: number[],
+    current: number,
+    disabled: boolean,
+    onPick: (value: number) => void,
+  ): HTMLElement {
+    return el(
+      'div',
+      { class: 'rule-chips', attrs: { role: 'group' } },
+      ...values.map((value) =>
+        el('button', {
+          class: `rule-chip${value === current ? ' on' : ''}`,
+          attrs: { type: 'button', 'aria-pressed': String(value === current), disabled },
+          text: String(value),
+          on: {
+            click: () => {
+              if (!disabled) onPick(value);
+            },
+          },
+        }),
+      ),
+    );
+  }
+
+  function rulesPanel(): HTMLElement {
+    const isHost = room.role === 'host';
+    const locked = !isHost;
+    const config = room.config;
+    const set = (patch: Partial<MatchConfig>): void => {
+      room.setConfig(patch);
+      sfx.ui();
+    };
+    const onOff = (current: boolean, onChange: (next: boolean) => void): HTMLElement =>
+      segControl(
+        [
+          { value: 'off', label: t('common.off') },
+          { value: 'on', label: t('common.on') },
+        ],
+        current ? 'on' : 'off',
+        locked,
+        (value) => onChange(value === 'on'),
+      );
+
+    const children: HTMLElement[] = [
+      el('div', { class: 'panel-title' }, el('span', { class: 'label', text: t('rules.title') })),
+    ];
+
+    if (room.mode === 'versus') {
+      children.push(
+        ruleField(
+          t('rules.objective'),
+          segControl<MatchObjective>(
+            [
+              { value: 'target', label: t('rules.targetRows') },
+              { value: 'sudden', label: t('rules.sudden') },
+            ],
+            config.objective === 'sudden' ? 'sudden' : 'target',
+            locked,
+            (objective) => set({ objective }),
+          ),
+          t('rules.versusObjectiveHint'),
+        ),
+      );
+      if (config.objective !== 'sudden') {
+        children.push(
+          ruleField(
+            t('rules.rowsTarget'),
+            chipRow(VERSUS_TARGET_PRESETS, config.target, locked, (target) => set({ target })),
+            t('rules.rowsHint'),
+          ),
+        );
+      }
+      children.push(
+        ruleField(
+          t('rules.meter'),
+          onOff(config.meldMeter, (meldMeter) => set({ meldMeter })),
+          t('rules.meterDuelHint'),
+        ),
+        ruleField(
+          t('rules.clash'),
+          onOff(config.clash, (clash) => set({ clash })),
+          t('rules.clashHint'),
+        ),
+      );
+    } else {
+      children.push(
+        ruleField(
+          t('rules.objective'),
+          segControl<MatchObjective>(
+            [
+              { value: 'target', label: t('rules.targetMelds') },
+              { value: 'endless', label: t('rules.endless') },
+            ],
+            config.objective === 'endless' ? 'endless' : 'target',
+            locked,
+            (objective) => set({ objective }),
+          ),
+          t('rules.objectiveHint'),
+        ),
+      );
+      if (config.objective !== 'endless') {
+        children.push(
+          ruleField(
+            t('rules.meldTarget'),
+            chipRow(MELD_TARGET_PRESETS, config.target, locked, (target) => set({ target })),
+            t('rules.meldTargetHint'),
+          ),
+        );
+      }
+      children.push(
+        ruleField(
+          t('rules.meter'),
+          onOff(config.meldMeter, (meldMeter) => set({ meldMeter })),
+          t('rules.meterHint'),
+        ),
+        ruleField(
+          t('rules.meteor'),
+          segControl<MeteorMode>(
+            [
+              { value: 'off', label: t('common.off') },
+              { value: 'standard', label: t('rules.meteorStandard') },
+              { value: 'starfall', label: t('rules.meteorStarfall') },
+            ],
+            config.meteor,
+            locked,
+            (meteor) => set({ meteor }),
+          ),
+          t('rules.meteorHint'),
+        ),
+        ruleField(
+          t('rules.chaos'),
+          segControl<ChaosLevel>(
+            [
+              { value: 'off', label: t('common.off') },
+              { value: 'occasional', label: t('rules.chaosOccasional') },
+              { value: 'frequent', label: t('rules.chaosFrequent') },
+            ],
+            config.chaos,
+            locked,
+            (chaos) => set({ chaos }),
+          ),
+          t('rules.chaosHint'),
+        ),
+      );
+    }
+
+    if (!isHost) children.push(el('p', { class: 'tiny faint', text: t('rules.hostOnly') }));
+    return el('div', { class: 'panel panel-pad stack rules-card' }, ...children);
+  }
+
   function actionPanel(): HTMLElement {
     const guest = guestPlayer();
     const isHost = room.role === 'host';
@@ -264,6 +462,7 @@ export function renderLobby(api: AppApi, room: BaseRoom): { node: HTMLElement; d
       self: room.selfId,
       role: room.role,
       difficulty: room.difficulty,
+      config: room.config,
     });
     if (!force && signature === lastSignature) return;
     lastSignature = signature;
@@ -280,7 +479,9 @@ export function renderLobby(api: AppApi, room: BaseRoom): { node: HTMLElement; d
     const guest = guestPlayer();
     cards.push(guest ? playerCard(guest) : emptyCard());
     playersGrid.replaceChildren(...cards);
-    actionArea.replaceChildren(actionPanel());
+    const panels: HTMLElement[] = [actionPanel()];
+    if (configurableMode(room.mode)) panels.push(rulesPanel());
+    actionArea.replaceChildren(...panels);
   }
 
   function hostFallback(): LobbyPlayer {

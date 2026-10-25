@@ -1,7 +1,8 @@
 import { COLS, ROWS } from '../shared/constants.js';
 import { pieceCells } from '../shared/pieces.js';
 import { paletteById } from './palettes.js';
-import type { Cell, GameEvent, Piece, Phase } from '../shared/types.js';
+import type { EffectsLevel } from './settings.js';
+import type { Cell, CellShell, ChaosState, GameEvent, Meteor, Piece, Phase } from '../shared/types.js';
 
 export interface RenderPlayer {
   name: string;
@@ -23,12 +24,18 @@ export interface RenderView {
   localPlayer: number;
   events: GameEvent[];
   paused: boolean;
+  shells?: CellShell[];
+  meteors?: Meteor[];
+  chaos?: ChaosState | null;
+  chaosActive?: boolean;
+  combo?: number;
 }
 
 interface Flash {
   rows: number[];
   start: number;
   owner: number;
+  combo: number;
 }
 
 interface Ping {
@@ -40,11 +47,35 @@ interface Ping {
 interface Burst {
   start: number;
   owner: number;
+  combo: number;
+  kind: 'meld' | 'meter' | 'meteor' | 'win' | 'lose';
+  x?: number;
+  y?: number;
+}
+
+interface Fragment {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  life: number;
+  ttl: number;
+  color: string;
+  size: number;
+  spin: number;
+  angle: number;
+}
+
+interface MeteorMark {
+  seen: number;
 }
 
 const CLEAR_FLASH_MS = 420;
 const PING_MS = 2600;
 const BURST_MS = 680;
+const METER_WAVE_MS = 1150;
+const METEOR_FALL_MS = 900;
+const MAX_FRAGMENTS = 260;
 
 function rgba(hex: string, alpha: number): string {
   const clean = hex.replace('#', '');
@@ -281,6 +312,101 @@ function drawBlock(
   ctx.restore();
 }
 
+/** A removable crystal shell: a faceted plate with cracks that keeps the cell from clearing. */
+function drawShellPlate(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  size: number,
+  now: number,
+  motion: boolean,
+): void {
+  const inset = Math.max(1, size * 0.055);
+  const bx = x + inset;
+  const by = y + inset;
+  const w = size - inset * 2;
+  const h = size - inset * 2;
+  const pulse = motion ? 0.55 + Math.sin(now / 320) * 0.16 : 0.6;
+  ctx.save();
+  const plate = ctx.createLinearGradient(bx, by, bx + w, by + h);
+  plate.addColorStop(0, `rgba(214, 232, 255, ${0.24 * pulse + 0.18})`);
+  plate.addColorStop(0.5, `rgba(167, 139, 250, ${0.2 * pulse + 0.12})`);
+  plate.addColorStop(1, `rgba(236, 254, 255, ${0.22 * pulse + 0.16})`);
+  roundRect(ctx, bx, by, w, h, Math.max(2, size * 0.18));
+  ctx.fillStyle = plate;
+  ctx.fill();
+  ctx.strokeStyle = `rgba(226, 232, 255, ${0.5 + pulse * 0.35})`;
+  ctx.lineWidth = Math.max(1, size * 0.055);
+  ctx.stroke();
+  // Facet cracks read as "break me" rather than as a normal block.
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
+  ctx.lineWidth = Math.max(1, size * 0.035);
+  ctx.beginPath();
+  ctx.moveTo(bx + w * 0.5, by + h * 0.14);
+  ctx.lineTo(bx + w * 0.4, by + h * 0.5);
+  ctx.lineTo(bx + w * 0.62, by + h * 0.86);
+  ctx.moveTo(bx + w * 0.4, by + h * 0.5);
+  ctx.lineTo(bx + w * 0.14, by + h * 0.62);
+  ctx.moveTo(bx + w * 0.62, by + h * 0.86);
+  ctx.lineTo(bx + w * 0.86, by + h * 0.72);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function starPath(ctx: CanvasRenderingContext2D, cx: number, cy: number, radius: number, inner: number): void {
+  ctx.beginPath();
+  for (let i = 0; i < 8; i++) {
+    const angle = (Math.PI / 4) * i - Math.PI / 2;
+    const r = i % 2 === 0 ? radius : inner;
+    const px = cx + Math.cos(angle) * r;
+    const py = cy + Math.sin(angle) * r;
+    if (i === 0) ctx.moveTo(px, py);
+    else ctx.lineTo(px, py);
+  }
+  ctx.closePath();
+}
+
+/** The meteor itself: a dark crystal cube with a burning star inside. */
+function drawMeteorCube(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  size: number,
+  now: number,
+  star: boolean,
+  motion: boolean,
+): void {
+  const inset = Math.max(1, size * 0.08);
+  const bx = x + inset;
+  const by = y + inset;
+  const w = size - inset * 2;
+  const h = size - inset * 2;
+  const core = star ? '#ffe9a8' : '#c4b5fd';
+  ctx.save();
+  const body = ctx.createLinearGradient(bx, by, bx, by + h);
+  body.addColorStop(0, '#191426');
+  body.addColorStop(0.55, '#0b0a14');
+  body.addColorStop(1, '#05040a');
+  roundRect(ctx, bx, by, w, h, Math.max(2, size * 0.18));
+  ctx.fillStyle = body;
+  ctx.fill();
+  ctx.strokeStyle = star ? 'rgba(255, 226, 150, 0.85)' : 'rgba(167, 139, 250, 0.8)';
+  ctx.lineWidth = Math.max(1, size * 0.06);
+  ctx.stroke();
+
+  const glow = motion ? 0.6 + Math.sin(now / 180) * 0.25 : 0.7;
+  ctx.shadowColor = rgba(core, 0.9);
+  ctx.shadowBlur = size * 0.5;
+  ctx.strokeStyle = rgba(core, 0.95);
+  ctx.lineWidth = Math.max(1, size * (star ? 0.075 : 0.055));
+  starPath(ctx, bx + w / 2, by + h / 2, size * 0.3, size * 0.1);
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = rgba(core, 0.16 * glow);
+  ctx.fill();
+  ctx.restore();
+}
+
 function dangerRows(board: (Cell | null)[]): number {
   for (let y = 0; y < ROWS; y++) {
     for (let x = 0; x < COLS; x++) if (board[y * COLS + x]) return y + 1;
@@ -294,9 +420,13 @@ export class BoardRenderer {
   private flashes: Flash[] = [];
   private pings: Ping[] = [];
   private bursts: Burst[] = [];
+  private fragments: Fragment[] = [];
+  private meteorMarks = new Map<string, MeteorMark>();
   private lastEventId = 0;
   private lastNow = 0;
+  private prevDraw = 0;
   reduceMotion = false;
+  effects: EffectsLevel = 'full';
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -309,7 +439,53 @@ export class BoardRenderer {
     this.flashes = [];
     this.pings = [];
     this.bursts = [];
+    this.fragments = [];
+    this.meteorMarks.clear();
     this.lastEventId = 0;
+  }
+
+  /** Only decoration is dropped by the setting; gameplay feedback stays readable. */
+  private get decorated(): boolean {
+    return this.effects === 'full' && !this.reduceMotion;
+  }
+
+  private get essential(): boolean {
+    return this.effects !== 'off';
+  }
+
+  private spawnFragments(
+    x: number,
+    y: number,
+    color: string,
+    count: number,
+    spread: number,
+    size: number,
+  ): void {
+    if (!this.decorated) return;
+    for (let i = 0; i < count; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = spread * (0.35 + Math.random());
+      this.fragments.push({
+        x,
+        y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed - spread * 0.3,
+        life: 0,
+        ttl: 520 + Math.random() * 480,
+        color,
+        size: size * (0.14 + Math.random() * 0.3),
+        spin: (Math.random() - 0.5) * 0.3,
+        angle: Math.random() * Math.PI,
+      });
+    }
+    if (this.fragments.length > MAX_FRAGMENTS) {
+      this.fragments.splice(0, this.fragments.length - MAX_FRAGMENTS);
+    }
+  }
+
+  private addBurst(kind: Burst['kind'], owner: number, combo: number, x?: number, y?: number): void {
+    if (!this.essential) return;
+    this.bursts.push({ start: this.lastNow, owner, combo, kind, x, y });
   }
 
   resize(): void {
@@ -325,24 +501,98 @@ export class BoardRenderer {
     }
   }
 
-  private ingest(events: GameEvent[], now: number): void {
+  private ingest(
+    events: GameEvent[],
+    now: number,
+    palettes: ReturnType<typeof paletteById>[],
+    geo: { cell: number; ox: number; oy: number },
+  ): void {
+    this.lastNow = now;
     for (const event of events) {
       if (event.id <= this.lastEventId) continue;
       this.lastEventId = event.id;
+      const owner = event.p ?? 0;
+      const palette = palettes[owner] ?? palettes[0];
+      const combo = event.combo ?? 1;
       if (event.type === 'clear') {
-        this.flashes.push({ rows: event.rows ?? [], start: now, owner: event.p ?? 0 });
+        const rows = event.rows ?? [];
+        this.flashes.push({ rows, start: now, owner, combo });
+        for (const row of rows) {
+          if (row < 0 || row >= ROWS) continue;
+          for (let x = 0; x < COLS; x += 2) {
+            this.spawnFragments(
+              geo.ox + (x + Math.random()) * geo.cell,
+              geo.oy + (row + 0.5) * geo.cell,
+              palette.colors[x % palette.colors.length],
+              1 + Math.min(4, combo),
+              geo.cell * 2.2,
+              geo.cell,
+            );
+          }
+        }
       } else if (event.type === 'meld') {
-        this.bursts.push({ start: now, owner: event.p ?? 0 });
+        this.addBurst('meld', owner, combo, geo.ox + (COLS / 2) * geo.cell, geo.oy + geo.cell * (ROWS / 2));
+        for (const row of event.rows ?? []) {
+          for (let i = 0; i < 8; i++) {
+            this.spawnFragments(
+              geo.ox + Math.random() * COLS * geo.cell,
+              geo.oy + (row + 0.5) * geo.cell,
+              i % 2 === 0 ? palette.colors[i % 7] : palettes[0].colors[(i + 3) % 7],
+              2,
+              geo.cell * 3.2,
+              geo.cell,
+            );
+          }
+        }
+      } else if (event.type === 'meter') {
+        this.addBurst('meter', owner, 2, geo.ox + (COLS / 2) * geo.cell, geo.oy + (ROWS / 2) * geo.cell);
+        for (let i = 0; i < 26; i++) {
+          this.spawnFragments(
+            geo.ox + Math.random() * COLS * geo.cell,
+            geo.oy + Math.random() * ROWS * geo.cell,
+            palette.colors[i % palette.colors.length],
+            2,
+            geo.cell * 3.4,
+            geo.cell,
+          );
+        }
+      } else if (event.type === 'meteor' && event.col !== undefined && event.row !== undefined) {
+        const cx = geo.ox + (event.col + 0.5) * geo.cell;
+        const cy = geo.oy + (event.row + 0.5) * geo.cell;
+        this.addBurst('meteor', owner, event.star ? 3 : 1, cx, cy);
+        for (let i = 0; i < (event.star ? 20 : 10); i++) {
+          this.spawnFragments(
+            cx + (Math.random() - 0.5) * geo.cell,
+            cy + (Math.random() - 0.5) * geo.cell,
+            event.star ? (i % 2 === 0 ? '#ffe9a8' : '#a5f3fc') : palettes[i % 2]?.colors[i % 7] ?? '#c4b5fd',
+            2,
+            geo.cell * (event.star ? 4.4 : 3),
+            geo.cell,
+          );
+        }
       } else if (event.type === 'ping' && event.col !== undefined) {
-        this.pings.push({ col: event.col, owner: event.p ?? 0, start: now });
-      } else if (event.type === 'win') {
-        this.bursts.push({ start: now, owner: event.p ?? 0 });
-        this.bursts.push({ start: now + 180, owner: (event.p ?? 0) ^ 1 });
+        this.pings.push({ col: event.col, owner, start: now });
+      } else if (event.type === 'attack') {
+        // The victim sees the effect on the board; the sound and toast carry the warning.
+        this.addBurst('meteor', event.p ?? 0, 1, geo.ox + geo.cell * (COLS / 2), geo.oy + geo.cell * 4);
+      } else if (event.type === 'win' || event.type === 'lose') {
+        this.addBurst(event.type, owner, 3, geo.ox + (COLS / 2) * geo.cell, geo.oy + (ROWS / 2) * geo.cell);
+        for (let i = 0; i < 30; i++) {
+          this.spawnFragments(
+            geo.ox + Math.random() * COLS * geo.cell,
+            geo.oy + Math.random() * geo.cell * 3,
+            palettes[i % palettes.length]?.colors[i % 7] ?? '#a5f3fc',
+            1,
+            geo.cell * 2.4,
+            geo.cell,
+          );
+        }
       }
     }
     this.flashes = this.flashes.filter((f) => now - f.start < CLEAR_FLASH_MS);
-    this.bursts = this.bursts.filter((b) => now - b.start < BURST_MS);
+    this.bursts = this.bursts.filter((b) => now - b.start < (b.kind === 'meter' ? METER_WAVE_MS : BURST_MS));
     this.pings = this.pings.filter((p) => now - p.start < PING_MS);
+    this.fragments = this.fragments.filter((f) => f.life < f.ttl);
   }
 
   draw(view: RenderView, now: number): void {
@@ -359,7 +609,11 @@ export class BoardRenderer {
     const ox = Math.round((width - boardW) / 2);
     const oy = Math.round((height - boardH) / 2);
 
-    this.ingest(view.events, now);
+    const palettes = [
+      paletteById(view.players[0]?.paletteId ?? 'aurora'),
+      paletteById(view.players[1]?.paletteId ?? 'aurora'),
+    ];
+    this.ingest(view.events, now, palettes, { cell, ox, oy });
 
     // Slightly translucent so the aurora reads as light behind the arena, not a wallpaper.
     const bg = ctx.createLinearGradient(0, oy, 0, oy + boardH);
@@ -410,7 +664,14 @@ export class BoardRenderer {
       ctx.fillRect(ox, oy, boardW, cell * 5);
     }
 
-    const palettes = [paletteById(view.players[0]?.paletteId ?? 'aurora'), paletteById(view.players[1]?.paletteId ?? 'aurora')];
+    // Blackout dims the arena shell, never the crystals: the board stays readable.
+    const chaosKind = view.chaosActive ? view.chaos?.kind : null;
+    const blackout = chaosKind === 'blackout';
+    const colorSurge = chaosKind === 'colorSurge';
+    if (blackout) {
+      ctx.fillStyle = 'rgba(2, 4, 10, 0.66)';
+      ctx.fillRect(ox, oy, boardW, boardH);
+    }
 
     // Meld-ready hints: rows that need exactly one block.
     if (view.phase === 'playing') {
@@ -446,8 +707,54 @@ export class BoardRenderer {
         if (!cellValue) continue;
         const palette = palettes[cellValue.p] ?? palettes[0];
         const color = palette.colors[cellValue.k % palette.colors.length];
-        drawBlock(ctx, ox + x * cell, oy + y * cell, cell, color, cellValue.p, cellValue.k, { cache: true });
+        drawBlock(ctx, ox + x * cell, oy + y * cell, cell, color, cellValue.p, cellValue.k, {
+          cache: true,
+          glow: colorSurge,
+        });
       }
+    }
+
+    // Crystal shells sit on top of their cell and block clearing until they expire.
+    for (const shell of view.shells ?? []) {
+      const sx = shell.i % COLS;
+      const sy = Math.floor(shell.i / COLS);
+      if (sy < 0 || sy >= ROWS) continue;
+      drawShellPlate(ctx, ox + sx * cell, oy + sy * cell, cell, now, this.essential);
+    }
+
+    // Meteor Storm: telegraphed landing cells and the burning cube above them.
+    const meteors = view.meteors ?? [];
+    if (meteors.length > 0) {
+      for (const meteor of meteors) {
+        const key = `${meteor.col},${meteor.row},${meteor.at}`;
+        let mark = this.meteorMarks.get(key);
+        if (!mark) {
+          mark = { seen: now };
+          this.meteorMarks.set(key, mark);
+        }
+        const progress = Math.max(0, Math.min(1, (now - mark.seen) / METEOR_FALL_MS));
+        const targetX = ox + meteor.col * cell;
+        const targetY = oy + meteor.row * cell;
+        const pulse = this.essential ? 0.45 + Math.sin(now / 180) * 0.25 : 0.5;
+        // Telegraph: a dashed column and a landing bracket.
+        ctx.save();
+        ctx.strokeStyle = meteor.star ? `rgba(255, 226, 150, ${pulse})` : `rgba(196, 181, 253, ${pulse})`;
+        ctx.lineWidth = Math.max(1, cell * 0.05);
+        ctx.setLineDash([cell * 0.2, cell * 0.16]);
+        ctx.beginPath();
+        ctx.moveTo(targetX + cell / 2, oy);
+        ctx.lineTo(targetX + cell / 2, targetY);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.strokeRect(targetX + 1, targetY + 1, cell - 2, cell - 2);
+        ctx.restore();
+
+        const fallY = -cell + (targetY + cell) * progress;
+        drawMeteorCube(ctx, targetX, fallY, cell, now, meteor.star, this.essential);
+      }
+      if (this.meteorMarks.size > 24) this.meteorMarks.clear();
+    } else if (this.meteorMarks.size > 0) {
+      this.meteorMarks.clear();
     }
 
     // Ghost + active pieces
@@ -498,17 +805,84 @@ export class BoardRenderer {
       }
     }
 
-    // Meld bursts
+    // Energy waves: Melds, Meld Meter, meteors and match endings each get their own shape.
     for (const burst of this.bursts) {
-      const age = Math.max(0, now - burst.start) / BURST_MS;
-      if (age > 1) continue;
+      const duration = burst.kind === 'meter' ? METER_WAVE_MS : burst.kind === 'meteor' ? 760 : BURST_MS;
+      const age = Math.max(0, Math.min(1, (now - burst.start) / duration));
       const palette = palettes[burst.owner] ?? palettes[0];
-      const radius = cell * (1.6 + age * 4.4);
+      const partner = palettes[burst.owner === 0 ? 1 : 0] ?? palette;
+      const cx = burst.x ?? ox + boardW / 2;
+      const cy = burst.y ?? oy + boardH * 0.62;
+      if (burst.kind === 'meter') {
+        // A board-wide liquid pulse that sweeps from the centre outwards.
+        const sweep = ctx.createRadialGradient(cx, cy, 0, cx, cy, boardH * (0.15 + age * 0.9));
+        sweep.addColorStop(0, rgba(palette.accent, 0.3 * (1 - age)));
+        sweep.addColorStop(0.6, rgba(partner.accent, 0.16 * (1 - age)));
+        sweep.addColorStop(1, rgba(palette.accent, 0));
+        ctx.fillStyle = sweep;
+        ctx.fillRect(ox, oy, boardW, boardH);
+        for (let i = 0; i < 3; i++) {
+          const ringAge = Math.max(0, Math.min(1, age * 1.4 - i * 0.16));
+          if (ringAge <= 0) continue;
+          ctx.beginPath();
+          ctx.arc(cx, cy, boardH * (0.08 + ringAge * 0.62), 0, Math.PI * 2);
+          ctx.strokeStyle = rgba(i % 2 === 0 ? palette.accent : '#e0f2fe', (1 - ringAge) * 0.55);
+          ctx.lineWidth = Math.max(2, cell * 0.16 * (1 - ringAge));
+          ctx.stroke();
+        }
+        continue;
+      }
+      if (burst.kind === 'meteor') {
+        ctx.beginPath();
+        ctx.arc(cx, cy, cell * (0.4 + age * 3.2), 0, Math.PI * 2);
+        ctx.strokeStyle = rgba('#e9d5ff', (1 - age) * 0.8);
+        ctx.lineWidth = Math.max(2, cell * 0.14 * (1 - age));
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(cx, cy, cell * (0.2 + age * 1.9), 0, Math.PI * 2);
+        ctx.strokeStyle = rgba('#a5f3fc', (1 - age) * 0.6);
+        ctx.stroke();
+        continue;
+      }
+      const combo = Math.min(4, burst.combo ?? 1);
+      const radius = cell * (1.5 + combo * 0.25 + age * 4.4);
       ctx.beginPath();
-      ctx.arc(ox + boardW / 2, oy + boardH * 0.62, radius, 0, Math.PI * 2);
-      ctx.strokeStyle = rgba(palette.accent, (1 - age) * 0.7);
+      ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+      ctx.strokeStyle = rgba(palette.accent, (1 - age) * (burst.kind === 'meld' ? 0.8 : 0.65));
       ctx.lineWidth = Math.max(2, cell * 0.12 * (1 - age));
       ctx.stroke();
+      if (burst.kind === 'meld' || burst.kind === 'win') {
+        ctx.beginPath();
+        ctx.arc(cx, cy, radius * 0.72, 0, Math.PI * 2);
+        ctx.strokeStyle = rgba(partner.accent, (1 - age) * 0.6);
+        ctx.lineWidth = Math.max(1.5, cell * 0.08 * (1 - age));
+        ctx.stroke();
+      }
+      if (burst.kind === 'lose' && this.essential) {
+        ctx.fillStyle = `rgba(8, 10, 18, ${0.35 * (1 - age)})`;
+        ctx.fillRect(ox, oy, boardW, boardH);
+      }
+    }
+
+    // Crystal fragments from clears, Melds, meteors and the Meld Meter.
+    const dt = Math.min(48, Math.max(0, now - (this.prevDraw || now)));
+    this.prevDraw = now;
+    for (const fragment of this.fragments) {
+      fragment.life += dt;
+      if (fragment.life >= fragment.ttl) continue;
+      fragment.x += (fragment.vx * dt) / 16;
+      fragment.y += (fragment.vy * dt) / 16;
+      fragment.vy += (0.09 * dt) / 16;
+      fragment.angle += fragment.spin;
+      const alpha = Math.max(0, 1 - fragment.life / fragment.ttl);
+      ctx.save();
+      ctx.translate(fragment.x, fragment.y);
+      ctx.rotate(fragment.angle);
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = fragment.color;
+      roundRect(ctx, -fragment.size / 2, -fragment.size / 2, fragment.size, fragment.size, fragment.size * 0.3);
+      ctx.fill();
+      ctx.restore();
     }
 
     // Ping rings and column highlight

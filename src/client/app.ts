@@ -1,10 +1,11 @@
 import type { AppApi } from './api.js';
 import { applyI18n, getLang, setLang, t } from './i18n.js';
 import type { I18nKey } from './i18n.js';
-import { loadSettings, saveSettings, type Lang, type Settings } from './settings.js';
+import { loadSettings, saveSettings, type EffectsLevel, type Lang, type Settings } from './settings.js';
 import { createGuestRoom, createHostRoom, createSoloRoom } from './net.js';
 import type { BaseRoom } from './net.js';
 import { isRoomCode, normalizeRoomCode } from '../shared/protocol.js';
+import { defaultConfig } from '../shared/config.js';
 import { isOnlineMode, isSoloMode } from '../shared/types.js';
 import type { GameMode } from '../shared/types.js';
 import { controlGuide, el, openModal, toast } from './ui.js';
@@ -283,10 +284,17 @@ export class App implements AppApi {
       this.settings = saveSettings({ name });
     }
     const errors = { key: null as string | null };
-    const room = createHostRoom(name, this.settings.palette, mode, this.settings.difficulty, (key) => {
-      errors.key = key;
-      toast(t(key as I18nKey), 'bad');
-    });
+    const room = createHostRoom(
+      name,
+      this.settings.palette,
+      mode,
+      this.settings.difficulty,
+      defaultConfig(mode),
+      (key: string) => {
+        errors.key = key;
+        toast(t(key as I18nKey), 'bad');
+      },
+    );
     this.room = room;
     this.bindRoom(room, errors);
     this.showLobby();
@@ -339,6 +347,7 @@ export class App implements AppApi {
 
     body.append(el('p', { class: 'small', text: t('help.intro') }));
     addSection(t('help.modesTitle'), t('help.modesBody'));
+    addSection(t('help.rulesTitle'), t('help.rulesBody'));
     addSection(t('help.difficultyTitle'), t('help.difficultyBody'));
     addSection(t('help.arenaTitle'), t('help.arenaBody'));
     addSection(t('help.meldTitle'), t('help.meldBody'));
@@ -497,12 +506,24 @@ export class App implements AppApi {
     );
     auroraField.append(el('span', { class: 'tiny faint', text: t('help.auroraHint') }));
 
+    const effectsField = segmented<EffectsLevel>(
+      t('help.effects'),
+      [
+        { value: 'full', label: t('help.effectsFull') },
+        { value: 'reduced', label: t('help.effectsReduced') },
+        { value: 'off', label: t('help.effectsOff') },
+      ],
+      this.settings.effects,
+      (value) => this.updateSettings({ effects: value }),
+    );
+    effectsField.append(el('span', { class: 'tiny faint', text: t('help.effectsHint') }));
+
     body.append(
       settingsRow,
       el('div', { class: 'divider' }),
       el('h3', { text: t('help.mediaTitle') }),
       el('p', { class: 'small', text: t('help.mediaBody') }),
-      el('div', { class: 'settings-grid' }, musicField, volumeField, themeField, auroraField),
+      el('div', { class: 'settings-grid' }, musicField, volumeField, themeField, auroraField, effectsField),
     );
 
     openModal({

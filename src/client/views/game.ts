@@ -6,10 +6,10 @@ import { el } from '../ui.js';
 import { paletteById } from '../palettes.js';
 import { encodeBoard } from '../../shared/engine.js';
 import { isSoloMode } from '../../shared/types.js';
-import type { Action, GameMode } from '../../shared/types.js';
+import type { Action, AttackKind, GameEvent, GameMode } from '../../shared/types.js';
 import type { ViewState } from '../view.js';
 import { toast } from '../ui.js';
-import { difficultyKey } from '../view.js';
+import { chaosKey, difficultyKey } from '../view.js';
 import { sfx } from '../audio.js';
 import { Aurora } from '../aurora.js';
 import { music } from '../music.js';
@@ -60,19 +60,59 @@ export function renderGame(api: AppApi, room: BaseRoom): { node: HTMLElement; di
   const paceValue = el('div', { class: 'v', text: t(difficultyKey(room.difficulty)) });
 
   function goalText(mode: GameMode, current: ViewState): string {
-    if (mode === 'versus') return t('game.versusGoal', { n: current.objective });
+    if (mode === 'versus') {
+      return current.objective > 0 ? t('game.versusGoal', { n: current.objective }) : t('game.suddenGoal');
+    }
     if (mode === 'relay') return t('game.relayGoal', { n: current.objective });
     if (mode === 'rift') return t('game.riftWave', { n: current.wave, m: current.objective });
     if (mode === 'architect') return t('game.architectGoal', { n: current.objective });
     if (mode === 'endless') return t('game.endlessGoal');
     if (mode === 'solo') return t('game.soloGoal', { n: current.objective });
-    return t('game.coopGoal', { n: current.objective });
+    return current.objective > 0
+      ? t('game.coopGoal', { n: current.objective })
+      : t('game.endlessGoal');
   }
   const oath = el('div', { class: 'oath' });
 
   function stat(label: string, value: HTMLElement, extra?: HTMLElement): HTMLElement {
     return el('div', { class: 'stat' }, el('div', { class: 'k', text: label }), value, extra ?? null);
   }
+
+  const meterFill = el('i', { class: 'meter-fill' });
+  const meterLabel = el('span', { class: 'meter-label', text: t('game.meldMeter') });
+  const meterHint = el('small', { class: 'meter-hint', text: t('game.meterHint') });
+  const meterNode = el(
+    'button',
+    {
+      class: 'meld-meter',
+      attrs: { type: 'button', 'aria-label': t('game.meterAria') },
+      on: {
+        click: () => {
+          if (!view?.meterReady[view.localPlayer]) return;
+          sfx.unlock();
+          send({ t: 'meter' });
+        },
+      },
+    },
+    meterFill,
+    el('span', { class: 'meter-text' }, meterLabel, meterHint),
+  );
+
+  const chaosText = el('span', { class: 'badge-text' });
+  const chaosBadge = el(
+    'div',
+    { class: 'arena-badge chaos' },
+    el('i', { class: 'badge-glyph', text: '✦' }),
+    chaosText,
+  );
+  const comboText = el('span', { class: 'badge-text' });
+  const comboBadge = el(
+    'div',
+    { class: 'arena-badge combo' },
+    el('i', { class: 'badge-glyph', text: '✧' }),
+    comboText,
+  );
+  const statusStrip = el('div', { class: 'arena-status' }, chaosBadge, comboBadge);
 
   const scoreStat = stat(t('game.score'), scoreValue);
   const meldLabel = el('div', { class: 'k', text: t('game.melds') });
@@ -113,6 +153,36 @@ export function renderGame(api: AppApi, room: BaseRoom): { node: HTMLElement; di
     return el('div', { attrs: { style: 'margin-top:4px' } }, el('kbd', { text: keys }), ' ', label);
   }
 
+  // ---------- Clash Attack controls (Duel only, host-enabled) ----------
+
+  const clashButtons = new Map<AttackKind, HTMLButtonElement>();
+  const clashCharge = el('span', { class: 'tiny faint' });
+  const clashNote = el('p', { class: 'tiny faint', text: t('game.clashHint') });
+  const clashCard = el('div', { class: 'game-help clash-card' });
+  const attackLabels: Record<AttackKind, string> = {
+    obstruction: t('game.clashObstruction'),
+    surge: t('game.clashSurge'),
+    shell: t('game.clashShell'),
+  };
+  for (const kind of ['obstruction', 'surge', 'shell'] as AttackKind[]) {
+    const button = el('button', {
+      class: 'btn small wide',
+      attrs: { type: 'button' },
+      text: attackLabels[kind],
+      on: {
+        click: () => {
+          if (pauseInfo) return;
+          sfx.ui();
+          send({ t: 'clash', kind });
+        },
+      },
+    });
+    clashButtons.set(kind, button);
+    clashCard.append(button);
+  }
+  clashCard.prepend(el('b', { text: t('game.clashTitle') }), clashCharge);
+  clashCard.append(clashNote);
+
   const leftColumn = el(
     'div',
     { class: 'game-left' },
@@ -121,6 +191,7 @@ export function renderGame(api: AppApi, room: BaseRoom): { node: HTMLElement; di
     linesStat,
     goalStat,
     paceStat,
+    clashCard,
     pauseButton,
     helpButton,
     controlsCard,
@@ -174,7 +245,7 @@ export function renderGame(api: AppApi, room: BaseRoom): { node: HTMLElement; di
     partnerChip.root,
   );
 
-  const boardShell = el('div', { class: 'board-shell' }, boardWrap);
+  const boardShell = el('div', { class: 'board-shell' }, meterNode, statusStrip, boardWrap);
 
   const touchPad = el('div', { class: 'touch' });
 
@@ -215,12 +286,14 @@ export function renderGame(api: AppApi, room: BaseRoom): { node: HTMLElement; di
   renderer.reduceMotion = api.settings.reduceMotion;
   music.setScene('game', view?.mode ?? room.mode);
 
+  let meterShown = false;
+
   function fit(): void {
     const wrapWidth = boardWrap.clientWidth;
     if (wrapWidth <= 0) return;
     const narrow = window.innerWidth <= 700;
-    // Reserve room for the top bar, compact HUD, player chips and touch pads.
-    const reserved = narrow ? 322 : 250;
+    // Reserve room for the top bar, compact HUD, player chips, touch pads and the meter strip.
+    const reserved = (narrow ? 322 : 250) + (meterShown ? 62 : 0);
     const availableHeight = window.innerHeight - reserved;
     const height = Math.max(220, Math.min(availableHeight, 660, wrapWidth * 2));
     const width = height / 2;
@@ -316,6 +389,11 @@ export function renderGame(api: AppApi, room: BaseRoom): { node: HTMLElement; di
     if (event.key === 'h' || event.key === 'H') {
       event.preventDefault();
       api.openHelp();
+      return;
+    }
+    if (event.key === 'm' || event.key === 'M') {
+      event.preventDefault();
+      if (view?.meterReady[view.localPlayer] && !pauseInfo) send({ t: 'meter' });
       return;
     }
     const action = keyActions[event.key];
@@ -526,6 +604,8 @@ export function renderGame(api: AppApi, room: BaseRoom): { node: HTMLElement; di
         progress = `${t('game.riftGoal', { n: view?.objective ?? 0 })} · ${t('game.melds')}: ${view?.melds ?? 0}`;
       } else if (solo) {
         progress = `${t('game.lines')}: ${view?.lines ?? 0}${mode === 'endless' ? '' : `/${view?.objective ?? 0}`}`;
+      } else if ((view?.objective ?? 0) <= 0) {
+        progress = `${t('game.melds')}: ${view?.melds ?? 0} · ${t('game.lines')}: ${view?.lines ?? 0}`;
       } else {
         progress = `${t('game.melds')}: ${view?.melds ?? 0}/${view?.objective ?? 0} · ${t('game.lines')}: ${view?.lines ?? 0}`;
       }
@@ -574,19 +654,55 @@ export function renderGame(api: AppApi, room: BaseRoom): { node: HTMLElement; di
     setTimeout(() => node2.remove(), 1150);
   }
 
-  function reactToEvent(event: { type: string; n?: number; col?: number; rows?: number[]; p?: number }, current: ViewState): void {
+  function reactToEvent(event: GameEvent, current: ViewState): void {
     switch (event.type) {
       case 'lock':
         sfx.lock();
         break;
       case 'clear':
-        sfx.clear(event.n ?? event.rows?.length ?? 1);
-        pop(event.n && event.n > 1 ? t('game.clearToastN', { n: event.n }) : t('game.clearToast'));
+        sfx.clear(Math.min(4, Math.max(event.n ?? 1, event.combo ?? 1)));
+        if ((event.combo ?? 0) >= 2) {
+          pop(t('game.comboToast', { n: event.combo ?? 0 }));
+        } else {
+          pop(event.n && event.n > 1 ? t('game.clearToastN', { n: event.n }) : t('game.clearToast'));
+        }
         break;
       case 'meld':
         sfx.meld();
         pop(event.n && event.n > 1 ? t('game.meldToastN', { n: event.n }) : t('game.meldToast'));
         break;
+      case 'meter':
+        sfx.meld();
+        pop(t('game.meterUsed'));
+        break;
+      case 'meteor':
+        sfx.clear(event.star ? 3 : 2);
+        pop(t(event.star ? 'game.starfallHit' : 'game.meteorHit'));
+        break;
+      case 'chaos':
+        if (
+          event.kind === 'lowGravity' ||
+          event.kind === 'surge' ||
+          event.kind === 'blackout' ||
+          event.kind === 'colorSurge'
+        ) {
+          toast(t('game.chaosAnnounce', { name: t(chaosKey(event.kind)) }), 'warn');
+        }
+        break;
+      case 'attack': {
+        const kindName =
+          event.kind === 'obstruction'
+            ? t('game.clashObstruction')
+            : event.kind === 'shell'
+              ? t('game.clashShell')
+              : t('game.clashSurge');
+        if (event.p === current.localPlayer) {
+          toast(t('game.attackSentWith', { name: kindName }), 'info');
+        } else {
+          toast(t('game.attackIncomingWith', { name: kindName }), 'warn');
+        }
+        break;
+      }
       case 'ping': {
         sfx.ping();
         const player = event.p !== undefined ? current.players[event.p] : undefined;
@@ -644,11 +760,55 @@ export function renderGame(api: AppApi, room: BaseRoom): { node: HTMLElement; di
       meldValue.textContent =
         current.mode === 'endless' ? String(current.lines) : `${current.lines} / ${current.objective}`;
     } else {
-      meldValue.textContent = `${current.melds} / ${current.objective}`;
+      meldValue.textContent =
+        current.objective > 0
+          ? `${current.melds} / ${current.objective}`
+          : `${current.melds} · ${t('game.endless')}`;
     }
     linesStat.style.display = solo || versus ? 'none' : '';
     linesValue.textContent = String(current.lines);
     paceValue.textContent = t(difficultyKey(current.difficulty));
+
+    // ---------- Meld Meter ----------
+    const config = current.config;
+    const showingMeter = config.meldMeter && (current.mode === 'coop' || versus);
+    meterShown = showingMeter;
+    meterNode.style.display = showingMeter ? '' : 'none';
+    const charge = current.meter[localIndex] ?? 0;
+    const ready = Boolean(current.meterReady[localIndex]);
+    meterFill.style.width = `${Math.round(Math.max(0, Math.min(1, charge)) * 100)}%`;
+    meterNode.classList.toggle('ready', ready);
+    meterNode.disabled = !ready || current.phase !== 'playing' || Boolean(pauseInfo);
+    meterLabel.textContent = ready ? t('game.meterReady') : t('game.meldMeter');
+    meterHint.textContent = ready ? t('game.meterReadyHint') : t('game.meterHint');
+
+    // ---------- Chaos + combo status ----------
+    if (current.chaos) {
+      const name = t(chaosKey(current.chaos.kind));
+      chaosBadge.classList.add('show');
+      chaosBadge.classList.toggle('active', current.chaosActive);
+      chaosText.textContent = current.chaosActive
+        ? t('game.chaosActive', { name, s: Math.max(0, Math.ceil(current.chaosLeft)) })
+        : t('game.chaosIncoming', { name, s: Math.max(0, Math.ceil(current.chaosIn)) });
+    } else {
+      chaosBadge.classList.remove('show');
+    }
+    if (current.combo >= 2) {
+      comboBadge.classList.add('show');
+      comboText.textContent = t('game.comboBadge', { n: current.combo });
+    } else {
+      comboBadge.classList.remove('show');
+    }
+
+    // ---------- Clash Attack ----------
+    const clashOn = versus && config.clash;
+    clashCard.classList.toggle('on', clashOn);
+    if (clashOn) {
+      const points = current.attack[localIndex] ?? 0;
+      clashCharge.textContent = t('game.clashCharge', { n: points, max: current.attackCost });
+      const affordable = points >= current.attackCost && current.phase === 'playing' && !pauseInfo;
+      for (const button of clashButtons.values()) button.disabled = !affordable;
+    }
     if (relay && current.phase === 'playing') {
       goalValue.textContent =
         current.turn === localIndex
@@ -658,7 +818,8 @@ export function renderGame(api: AppApi, room: BaseRoom): { node: HTMLElement; di
       goalValue.textContent = goalText(current.mode, current);
     }
 
-    const segments = current.mode === 'endless' ? 0 : Math.max(1, current.objective);
+    const segments =
+      current.mode === 'endless' || current.objective <= 0 ? 0 : Math.max(1, current.objective);
     const filled = versus
       ? current.clears[localIndex] ?? 0
       : rift
@@ -757,6 +918,7 @@ export function renderGame(api: AppApi, room: BaseRoom): { node: HTMLElement; di
     if (disposed) return;
     if (view) {
       renderer.reduceMotion = api.settings.reduceMotion;
+      renderer.effects = api.settings.effects;
       aurora.setLevel(api.settings.aurora);
       aurora.setReduceMotion(api.settings.reduceMotion);
       renderer.draw(view, performance.now());
