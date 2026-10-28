@@ -35,12 +35,13 @@ export const PING_COOLDOWN_TICKS = 40;
 export const PING_LIFE_TICKS = 60;
 
 export const BASE_GRAVITY_MS = 850;
-export const MIN_GRAVITY_MS = 150;
-export const GRAVITY_RAMP_MS_PER_SEC = 14;
+export const MIN_GRAVITY_MS = 280;
+export const GRAVITY_RAMP_MS_PER_SEC = 5;
 
 /**
- * Gravity per difficulty. Normal is the original pace; Zen slows both the fall and the ramp so
- * a first match never turns frantic, and Hard opens at speed instead of building toward it.
+ * Gravity per difficulty. Normal eases over roughly two minutes instead of collapsing into the
+ * fast pace at the halfway point; Zen slows both the fall and the ramp so a first match never
+ * turns frantic, and Hard opens at speed instead of building toward it.
  */
 export const DIFFICULTY_PROFILES: Record<
   Difficulty,

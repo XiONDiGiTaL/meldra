@@ -47,7 +47,7 @@ A single **Difficulty** control on the menu sets the pace for whatever you play 
 | Pace | Fall starts at | Gravity floor | Feel |
 | --- | --- | --- | --- |
 | **Zen** | 1200 ms | 380 ms | Gentle ramp; a first match never turns frantic. |
-| **Normal** | 850 ms | 150 ms | The original designed pace. |
+| **Normal** | 850 ms | 280 ms | Eases over about two minutes; no mid-match spike. |
 | **Hard** | 320 ms | 110 ms | Fast from the first piece. |
 
 The choice is saved with the other preferences. In a room, the host can change the pace in the

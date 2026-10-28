@@ -406,11 +406,19 @@ opposite pressure profile: no target, no objective, just survival and score.
 
 **Difficulty is one shared pace, not per-mode variants.** Playtests described the mid-match speed
 jump as the point new players fall off. Three gravity profiles change both the starting interval and
-the ramp: Zen 1200 → 380 ms, Normal 850 → 150 ms (the original curve), Hard 320 → 110 ms. One
+the ramp: Zen 1200 → 380 ms, Normal 850 → 280 ms, Hard 320 → 110 ms. One
 persisted choice keeps the menu short and lets a player change the whole session's feel in one tap
 instead of configuring seven modes. The online host owns the choice; it travels in the welcome,
 lobby and snapshot messages (protocol v2), so a guest can never simulate a different curve than the
 host and the lobby shows the inherited value before the match starts.
+
+**Normal was retuned after release.** The first curve dropped from 850 ms to a 150 ms floor in
+about fifty seconds, so the second half of every Normal match sat at the hardest pace; players
+reported that as a difficulty wall rather than a ramp. The floor is now 280 ms and the ramp runs at
+5 ms per second, reaching the floor after roughly two minutes. The change only alters the values in
+[constants.ts](src/shared/constants.ts) — the single `gravityTicks` function still owns every pace
+question, so Zen, Hard, Sudden Death, chaos gravity events and Clash Gravity Surge keep their
+multipliers unchanged on top of the new base curve.
 
 **Clash is not shipped.** A four-player team mode needs a wider arena, four spawn lanes, and a
 four-player room protocol. Building it on top of the two-player relay would either break the

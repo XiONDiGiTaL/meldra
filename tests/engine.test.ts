@@ -329,6 +329,18 @@ describe('difficulty', () => {
     expect(gravityTicks(normal)).toBeGreaterThan(gravityTicks(hard));
   });
 
+  it('keeps Normal readable well past the halfway point', () => {
+    const state = createGame('solo', 5, 'normal');
+    const ticksAt = (seconds: number): number => {
+      state.playTicks = seconds * 20;
+      return gravityTicks(state);
+    };
+    expect(ticksAt(0)).toBe(17); // 850 ms
+    expect(ticksAt(30)).toBe(14); // 700 ms
+    expect(ticksAt(60)).toBe(11); // 550 ms, where the old curve was already near the floor
+    expect(ticksAt(180)).toBe(6); // 280 ms floor, never faster
+  });
+
   it('defaults to Normal and survives the snapshot round trip', () => {
     expect(createGame('solo', 3).difficulty).toBe('normal');
     const state = createGame('coop', 3, 'hard');

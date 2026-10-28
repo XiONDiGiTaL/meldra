@@ -3,6 +3,15 @@
 All notable changes to Meldra are recorded here. Dates use ISO 8601. "Verified" means the behaviour
 was executed in this environment; it does not mean a physical-device or production-hosting test.
 
+## 0.4.1 — 2026-10-28
+
+### Changed
+
+- **Gentler Normal pace:** gravity now eases from 850 ms to a 280 ms floor over roughly two
+  minutes instead of hitting 150 ms in about fifty seconds. The opening piece speed, Zen and Hard
+  are unchanged, and every modifier (Sudden Death, chaos gravity events, Clash Gravity Surge)
+  still applies its multiplier on top of the new curve.
+
 ## 0.4.0 — 2026-10-24
 
 Host-owned room rules, a shared recovery ability, environmental hazards, and a Duel attack layer.
